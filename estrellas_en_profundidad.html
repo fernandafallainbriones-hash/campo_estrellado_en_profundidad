@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campo de estrellas en profundidad</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  
+  /* Cursor modificado a normal (default) */
+  canvas{display:block;width:100vw;height:100vh;cursor:default}
+
+  /* ---------- Título superior (transparente, discreto) ---------- */
+  #titulo{
+    position:fixed;
+    top:26px;
+    left:0;
+    right:0;
+    margin:0;
+    text-align:center;
+    font:300 clamp(18px, 3vw, 38px)/1.15
+          ui-monospace,SFMono-Regular,Menlo,monospace;
+    letter-spacing:.22em;
+    text-transform:uppercase;
+
+    color:rgba(255,255,255,.28);
+    -webkit-text-fill-color:rgba(255,255,255,.28);
+
+    pointer-events:none;
+    user-select:none;
+    z-index:5;
+  }
+
+  /* ---------- HUD (solo velocidad) ---------- */
+  #hud{
+    position:fixed;left:14px;bottom:12px;color:#7fd4ff;
+    font:12px/1.5 ui-monospace,SFMono-Regular,monospace;opacity:.65;
+    pointer-events:none;user-select:none
+  }
+
+  /* ---------- Botón Hiperespacio ---------- */
+  #warp-btn{
+    position:fixed;right:22px;bottom:22px;
+    padding:14px 26px;
+    font:600 15px/1 ui-monospace,SFMono-Regular,monospace;
+    letter-spacing:.08em;text-transform:uppercase;color:#bfe9ff;
+    background:linear-gradient(180deg,rgba(20,60,110,.85),rgba(8,20,40,.9));
+    border:1px solid rgba(127,212,255,.55);border-radius:12px;cursor:pointer;
+    backdrop-filter:blur(6px);
+    box-shadow:0 0 12px rgba(127,212,255,.35), inset 0 0 12px rgba(127,212,255,.15);
+    transition:transform .08s ease, box-shadow .2s ease,
+               background .2s ease, color .2s ease;
+    user-select:none;z-index:10;
+  }
+  #warp-btn:hover{
+    color:#fff;
+    background:linear-gradient(180deg,rgba(40,110,190,.95),rgba(10,30,60,.95));
+    box-shadow:0 0 22px rgba(127,212,255,.7), inset 0 0 16px rgba(127,212,255,.35);
+  }
+  #warp-btn:active,
+  #warp-btn.active{
+    transform:scale(.96);color:#fff;
+    background:linear-gradient(180deg,rgba(90,180,255,1),rgba(30,80,160,1));
+    box-shadow:0 0 30px rgba(180,230,255,.95), inset 0 0 20px rgba(255,255,255,.35);
+  }
+  #warp-btn:focus-visible{outline:2px solid #7fd4ff;outline-offset:3px}
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<h1 id="titulo">Campo de estrellas en profundidad</h1>
+
+<div id="hud">v=4.0</div>
+
+<button id="warp-btn" type="button">Hiperespacio</button>
+
+<script>
+(() => {
+  'use strict';
+
+  const canvas  = document.getElementById('scene');
+  const ctx     = canvas.getContext('2d');
+  const hud     = document.getElementById('hud');
+  const warpBtn = document.getElementById('warp-btn');
+
+  const STAR_COUNT = 800;
+  const FOV = 0.9;
+  const NEAR = 1;
+  const FAR = 1000;
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let W = 0, H = 0, cx = 0, cy = 0, dpr = 1, k = 1;
+  let speed = reduceMotion ? 0.6 : 4;
+  let targetSpeed = speed;
+  const stars = [];
+
+  const baseSpeed = () => reduceMotion ? 0.6 : 4;
+
+  function crearEstrella(z) {
+    return {
+      x: (Math.random() * 2 - 1) * FAR,
+      y: (Math.random() * 2 - 1) * FAR,
+      z: z !== undefined ? z : NEAR + Math.random() * FAR,
+      pz: 0
+    };
+  }
+
+  function poblar() {
+    stars.length = 0;
+    for (let i = 0; i < STAR_COUNT; i++) stars.push(crearEstrella());
+  }
+
+  function proyectar(x, y, z) {
+    return { x: cx + (x / z) * k, y: cy + (y / z) * k };
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = canvas.clientWidth;
+    H = canvas.clientHeight;
+    canvas.width  = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx = W / 2;
+    cy = H / 2;
+    k = FOV * Math.min(W, H) * 0.5;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  let last = performance.now();
+
+  function frame(now) {
+    const dt = Math.min((now - last) / 16.667, 3);
+    last = now;
+
+    speed += (targetSpeed - speed) * 0.06 * dt;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.26)';
+    ctx.fillRect(0, 0, W, H);
+
+    const margen = 240;
+    const avance = speed * dt;
+
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      s.pz = s.z;
+      s.z -= avance;
+
+      if (s.z <= NEAR) {
+        stars[i] = crearEstrella(FAR);
+        continue;
+      }
+
+      const act = proyectar(s.x, s.y, s.z);
+      const ant = proyectar(s.x, s.y, s.pz + avance);
+
+      if ((act.x < -margen && ant.x < -margen) || (act.x > W + margen && ant.x > W + margen) ||
+          (act.y < -margen && ant.y < -margen) || (act.y > H + margen && ant.y > H + margen)) {
+        continue;
+      }
+
+      const t = 1 - s.z / FAR;
+      const alpha = Math.min(1, 0.12 + t * 1.3);
+      const grosor = Math.max(0.4, t * 2.4);
+
+      ctx.strokeStyle = `rgba(${(190 + 65 * t) | 0},${(215 + 40 * t) | 0},255,${alpha})`;
+      ctx.lineWidth = grosor;
+      ctx.beginPath();
+      ctx.moveTo(ant.x, ant.y);
+      ctx.lineTo(act.x, act.y);
+      ctx.stroke();
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  let warpTimer = 0;
+
+  function warp() {
+    targetSpeed = Math.min(140, targetSpeed + 70);
+    warpBtn.classList.add('active');
+    clearTimeout(warpTimer);
+    warpTimer = setTimeout(() => {
+      targetSpeed = baseSpeed();
+      warpBtn.classList.remove('active');
+    }, 750);
+  }
+
+  // Solo el botón dispara el hiperespacio
+  warpBtn.addEventListener('click', warp);
+
+  // Rueda del ratón: velocidad manual
+  window.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    targetSpeed = Math.max(0.5, Math.min(60, targetSpeed - e.deltaY * 0.02));
+  }, { passive: false });
+
+  window.addEventListener('resize', resize);
+
+  resize();
+  poblar();
+  requestAnimationFrame((t) => { last = t; frame(t); });
+
+  setInterval(() => {
+    hud.textContent = `v=${speed.toFixed(1)}`;
+  }, 200);
+})();
+</script>
+</body>
+</html>
